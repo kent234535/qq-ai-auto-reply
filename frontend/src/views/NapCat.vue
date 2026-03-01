@@ -18,7 +18,7 @@ async function fetchStatus() {
 
 async function doStart() {
   loading.value = true
-  msg.value = '正在启动 NapCat...'
+  msg.value = '正在启动 NapCat（关闭旧 QQ → 切换模式 → 启动），请稍候...'
   try {
     const { data } = await startNapCat()
     msg.value = data.message || (data.ok ? '启动成功' : '启动失败')
@@ -69,7 +69,12 @@ onMounted(fetchStatus)
       </div>
 
       <div v-if="status" style="margin-top: 8px; font-size: 0.85em; color: #666;">
-        <div v-if="status.pid">PID: {{ status.pid }}</div>
+        <div>QQ 模式:
+          <span :style="{ color: status.napcat_mode ? '#2a9d8f' : '#e63946', fontWeight: 600 }">
+            {{ status.napcat_mode ? 'NapCat 模式' : '普通模式（需切换）' }}
+          </span>
+        </div>
+        <div v-if="status.pids?.length">PID: {{ status.pids.join(', ') }}</div>
         <div>WebUI:
           <span :style="{ color: status.webui_reachable ? '#2a9d8f' : '#e63946' }">
             {{ status.webui_reachable ? '可达' : '不可达' }}
