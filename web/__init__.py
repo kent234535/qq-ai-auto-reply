@@ -26,12 +26,12 @@ def mount_web_app(driver: Driver) -> None:
 
     # 挂载前端静态文件（如果构建产物存在）
     if DIST_DIR.exists():
-        # 静态资源（JS/CSS 等）
+        # 静态资源（JS/CSS 等）— 路径必须与 vite base: '/web/' 匹配
         assets_dir = DIST_DIR / "assets"
         if assets_dir.exists():
-            app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
+            app.mount("/web/assets", StaticFiles(directory=str(assets_dir)), name="assets")
 
-        # SPA 回退：所有非 API / 非 OneBot 路径返回 index.html
+        # SPA 回退：非资源的 /web/* 路径返回 index.html
         @app.get("/web/{full_path:path}")
         @app.get("/web")
         async def serve_spa(full_path: str = ""):
