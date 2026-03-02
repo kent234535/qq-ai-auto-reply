@@ -1,19 +1,34 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { getNapCatStatus, startNapCat, stopNapCat, getNapCatQRCode } from '@/api/client'
+import { getNapCatStatus, startNapCat, stopNapCat, getNapCatQRCode, getSettings, updateSettings } from '@/api/client'
 
 const status = ref<any>(null)
 const qrcode = ref<any>(null)
 const loading = ref(false)
 const msg = ref('')
+const qqAccount = ref('')
+const savingAccount = ref(false)
 
 async function fetchStatus() {
   try {
-    const { data } = await getNapCatStatus()
-    status.value = data
+    const [{ data: s }, { data: settings }] = await Promise.all([getNapCatStatus(), getSettings()])
+    status.value = s
+    qqAccount.value = settings.qq_account || ''
   } catch {
     status.value = null
   }
+}
+
+async function saveQQAccount() {
+  savingAccount.value = true
+  try {
+    await updateSettings({ qq_account: qqAccount.value.trim() })
+    msg.value = 'QQ 账号已保存'
+    setTimeout(() => { if (msg.value === 'QQ 账号已保存') msg.value = '' }, 2000)
+  } catch {
+    msg.value = '保存失败'
+  }
+  savingAccount.value = false
 }
 
 async function doStart() {
@@ -85,6 +100,16 @@ onMounted(fetchStatus)
           </span>
         </div>
         <div v-if="status.login_error">登录提示: {{ status.login_error }}</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="form-group" style="margin-bottom: 0;">
+        <label>QQ 账号 <span style="font-weight: 400; color: #888; font-size: 0.9em;">留空则启动时不指定账号，需要扫码登录</span></label>
+        <div style="display: flex; gap: 8px;">
+          <input v-model="qqAccount" placeholder="如 123456789" style="flex: 1;" />
+          <button class="btn btn-success btn-sm" :disabled="savingAccount" @click="saveQQAccount">保存</button>
+        </div>
       </div>
     </div>
 

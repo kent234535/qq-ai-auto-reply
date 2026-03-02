@@ -9,7 +9,6 @@ const form = ref({
   timeout: 20,
   cooldown_seconds: 5,
   max_context_messages: 20,
-  qq_account: '',
 })
 const msg = ref('')
 
@@ -22,7 +21,6 @@ async function load() {
     timeout: data.timeout,
     cooldown_seconds: data.cooldown_seconds,
     max_context_messages: data.max_context_messages,
-    qq_account: data.qq_account || '',
   }
 }
 
@@ -66,10 +64,6 @@ onMounted(load)
       <div class="form-group">
         <label>最大上下文消息数</label>
         <input type="number" v-model.number="form.max_context_messages" min="2" />
-      </div>
-      <div class="form-group">
-        <label>QQ 账号 <span style="font-weight: 400; color: #888; font-size: 0.9em;">留空则启动时不指定账号</span></label>
-        <input v-model="form.qq_account" placeholder="如 123456789" />
       </div>
       <div class="flex gap-8" style="align-items: center;">
         <button class="btn btn-primary" @click="save">保存设置</button>
