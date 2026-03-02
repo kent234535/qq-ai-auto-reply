@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { listProviders, createProvider, updateProvider, deleteProvider, listAvailableModels, listProviderModels, getSettings, updateSettings } from '@/api/client'
+import { listProviders, createProvider, updateProvider, deleteProvider, testProviderModel, getSettings, updateSettings } from '@/api/client'
 
 const providers = ref<any[]>([])
 const activeProviderId = ref('')
@@ -14,11 +14,6 @@ const form = ref({
   enabled: true,
 })
 
-// 添加表单：可用模型
-const availableModels = ref<string[]>([])
-const modelsLoading = ref(false)
-const modelsError = ref('')
-
 // 编辑表单
 const editingId = ref('')
 const editForm = ref({
@@ -28,10 +23,12 @@ const editForm = ref({
   api_key: '',
   model: '',
 })
+const editApiKeyMasked = ref('')
 const savingEdit = ref(false)
-const editModels = ref<string[]>([])
-const editModelsLoading = ref(false)
-const editModelsError = ref('')
+
+// 检测模型
+const testingId = ref('')
+const testResult = ref<{ ok: boolean; msg: string } | null>(null)
 
 async function load() {
   const [p, s] = await Promise.all([listProviders(), getSettings()])
@@ -41,8 +38,6 @@ async function load() {
 
 function resetForm() {
   form.value = { name: '', type: 'openai_compat', base_url: '', api_key: '', model: '', enabled: true }
-  availableModels.value = []
-  modelsError.value = ''
 }
 
 async function save() {
@@ -67,33 +62,6 @@ async function activate(id: string) {
   activeProviderId.value = id
 }
 
-async function fetchModels() {
-  modelsError.value = ''
-  availableModels.value = []
-  if (!form.value.base_url || !form.value.api_key) {
-    modelsError.value = '请先填写 Base URL 和 API Key'
-    return
-  }
-  modelsLoading.value = true
-  try {
-    const { data } = await listAvailableModels({
-      type: form.value.type,
-      base_url: form.value.base_url,
-      api_key: form.value.api_key,
-    })
-    availableModels.value = data.models || []
-    if (!availableModels.value.length) modelsError.value = '未找到可用模型'
-  } catch (e: any) {
-    modelsError.value = e.response?.data?.detail || '获取模型列表失败'
-  }
-  modelsLoading.value = false
-}
-
-function selectModel(model: string) {
-  form.value.model = model
-  availableModels.value = []
-}
-
 function startEdit(p: any) {
   editingId.value = p.id
   editForm.value = {
@@ -103,44 +71,11 @@ function startEdit(p: any) {
     api_key: '',
     model: p.model || '',
   }
-  editModels.value = []
-  editModelsError.value = ''
+  editApiKeyMasked.value = p.api_key || ''
 }
 
 function cancelEdit() {
   editingId.value = ''
-  editModels.value = []
-  editModelsError.value = ''
-}
-
-async function fetchEditModels(p: any) {
-  editModelsError.value = ''
-  editModels.value = []
-  editModelsLoading.value = true
-  try {
-    // If user filled a new API key, use it with the form values directly
-    if (editForm.value.api_key) {
-      const { data } = await listAvailableModels({
-        type: editForm.value.type,
-        base_url: editForm.value.base_url,
-        api_key: editForm.value.api_key,
-      })
-      editModels.value = data.models || []
-    } else {
-      // Otherwise use stored credentials via backend
-      const { data } = await listProviderModels(p.id)
-      editModels.value = data.models || []
-    }
-    if (!editModels.value.length) editModelsError.value = '未找到可用模型'
-  } catch (e: any) {
-    editModelsError.value = e.response?.data?.detail || '获取模型列表失败'
-  }
-  editModelsLoading.value = false
-}
-
-function selectEditModel(model: string) {
-  editForm.value.model = model
-  editModels.value = []
 }
 
 async function saveEditForm(id: string) {
@@ -153,6 +88,18 @@ async function saveEditForm(id: string) {
   } finally {
     savingEdit.value = false
   }
+}
+
+async function testModel(id: string) {
+  testingId.value = id
+  testResult.value = null
+  try {
+    await testProviderModel(id)
+    testResult.value = { ok: true, msg: '模型可用' }
+  } catch (e: any) {
+    testResult.value = { ok: false, msg: e.response?.data?.detail || '检测失败' }
+  }
+  setTimeout(() => { if (testingId.value === id) { testingId.value = ''; testResult.value = null } }, 5000)
 }
 
 onMounted(load)
@@ -188,22 +135,9 @@ onMounted(load)
         <input v-model="form.api_key" type="password" placeholder="sk-..." />
       </div>
       <div class="form-group">
+        <div style="font-size: 0.8em; color: #888; margin-bottom: 4px;">请查阅 API 提供方的官方文档查看可用模型的完整字段</div>
         <label>模型</label>
-        <div style="display: flex; gap: 8px;">
-          <input v-model="form.model" placeholder="点击右侧按钮选择或手动输入" style="flex: 1;" />
-          <button class="btn btn-primary btn-sm" :disabled="modelsLoading" @click="fetchModels">
-            {{ modelsLoading ? '加载中...' : '显示可用模型' }}
-          </button>
-        </div>
-        <div v-if="modelsError" style="color: #e63946; font-size: 0.85em; margin-top: 4px;">{{ modelsError }}</div>
-        <div v-if="availableModels.length" style="margin-top: 8px; max-height: 200px; overflow-y: auto; border: 1px solid #ddd; border-radius: 6px;">
-          <div
-            v-for="m in availableModels" :key="m"
-            style="padding: 6px 12px; cursor: pointer; font-size: 0.9em; border-bottom: 1px solid #f0f0f0;"
-            :style="form.model === m ? 'background: #d4edda; font-weight: 600;' : ''"
-            @click="selectModel(m)"
-          >{{ m }}</div>
-        </div>
+        <input v-model="form.model" placeholder="如 deepseek-chat" />
       </div>
       <button class="btn btn-success" @click="save">保存</button>
     </div>
@@ -226,6 +160,12 @@ onMounted(load)
         API Key: {{ p.api_key || '未设置' }}
       </div>
 
+      <!-- 检测结果 -->
+      <div v-if="testingId === p.id && testResult" style="margin-top: 6px; font-size: 0.85em; font-weight: 600;"
+        :style="{ color: testResult.ok ? '#2a9d8f' : '#e63946' }">
+        {{ testResult.msg }}
+      </div>
+
       <div v-if="editingId === p.id" style="margin-top: 12px; border-top: 1px dashed #ddd; padding-top: 10px;">
         <div class="form-group">
           <label>名称</label>
@@ -244,24 +184,16 @@ onMounted(load)
         </div>
         <div class="form-group">
           <label>API Key（留空表示不修改）</label>
-          <input v-model="editForm.api_key" type="password" placeholder="输入新 key" />
+          <input v-model="editForm.api_key" type="password" :placeholder="editApiKeyMasked || '输入新 key'" />
         </div>
         <div class="form-group">
+          <div style="font-size: 0.8em; color: #888; margin-bottom: 4px;">请查阅 API 提供方的官方文档查看可用模型的完整字段</div>
           <label>模型</label>
           <div style="display: flex; gap: 8px;">
-            <input v-model="editForm.model" placeholder="手动输入或点击右侧选择" style="flex: 1;" />
-            <button class="btn btn-primary btn-sm" :disabled="editModelsLoading" @click="fetchEditModels(p)">
-              {{ editModelsLoading ? '加载中...' : '显示可用模型' }}
+            <input v-model="editForm.model" placeholder="如 deepseek-chat" style="flex: 1;" />
+            <button class="btn btn-primary btn-sm" :disabled="testingId === p.id && !testResult" @click="testModel(p.id)">
+              {{ testingId === p.id && !testResult ? '检测中...' : '检测模型' }}
             </button>
-          </div>
-          <div v-if="editModelsError" style="color: #e63946; font-size: 0.85em; margin-top: 4px;">{{ editModelsError }}</div>
-          <div v-if="editModels.length" style="margin-top: 8px; max-height: 200px; overflow-y: auto; border: 1px solid #ddd; border-radius: 6px;">
-            <div
-              v-for="m in editModels" :key="m"
-              style="padding: 6px 12px; cursor: pointer; font-size: 0.9em; border-bottom: 1px solid #f0f0f0;"
-              :style="editForm.model === m ? 'background: #d4edda; font-weight: 600;' : ''"
-              @click="selectEditModel(m)"
-            >{{ m }}</div>
           </div>
         </div>
         <div style="display: flex; gap: 8px;">

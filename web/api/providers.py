@@ -157,6 +157,55 @@ async def list_provider_models(provider_id: str):
         raise HTTPException(502, f"Connection failed: {e}")
 
 
+@router.post("/{provider_id}/test")
+async def test_provider_model(provider_id: str):
+    """Send a minimal chat request to verify the model works."""
+    p = config.get_provider(provider_id)
+    if not p:
+        raise HTTPException(404, "provider not found")
+    if not p.get("base_url") or not p.get("api_key") or not p.get("model"):
+        raise HTTPException(400, "provider missing base_url, api_key, or model")
+
+    try:
+        if p.get("type") == "claude":
+            base = p["base_url"].rstrip("/") if p.get("base_url") else "https://api.anthropic.com"
+            url = f"{base}/v1/messages"
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(url, headers={
+                    "x-api-key": p["api_key"],
+                    "anthropic-version": "2023-06-01",
+                    "Content-Type": "application/json",
+                }, json={
+                    "model": p["model"],
+                    "max_tokens": 5,
+                    "messages": [{"role": "user", "content": "hi"}],
+                })
+                resp.raise_for_status()
+        else:
+            url = f"{p['base_url'].rstrip('/')}/chat/completions"
+            async with httpx.AsyncClient(timeout=15) as client:
+                resp = await client.post(url, headers={
+                    "Authorization": f"Bearer {p['api_key']}",
+                    "Content-Type": "application/json",
+                }, json={
+                    "model": p["model"],
+                    "max_tokens": 5,
+                    "messages": [{"role": "user", "content": "hi"}],
+                })
+                resp.raise_for_status()
+        return {"ok": True}
+    except httpx.HTTPStatusError as e:
+        detail = ""
+        try:
+            body = e.response.json()
+            detail = body.get("error", {}).get("message", "") or str(body)
+        except Exception:
+            detail = e.response.text[:200]
+        raise HTTPException(e.response.status_code, detail or f"HTTP {e.response.status_code}")
+    except httpx.RequestError as e:
+        raise HTTPException(502, f"Connection failed: {e}")
+
+
 @router.get("/{provider_id}")
 async def get_provider(provider_id: str):
     p = config.get_provider(provider_id)
