@@ -4,7 +4,7 @@ import { getSettings, updateSettings } from '@/api/client'
 
 const form = ref({
   max_interactions: 10,
-  max_tokens: 2000,
+  max_tokens: 1000,
   temperature: 0.8,
   timeout: 120,
   cooldown_seconds: 0,
@@ -50,7 +50,7 @@ onMounted(load)
         <input type="number" v-model.number="form.max_tokens" min="100" max="16384" />
       </div>
       <div class="form-group">
-        <label>生成温度 (0-2)</label>
+        <label>生成温度 (0-2) <span style="font-weight: 400; color: #888; font-size: 0.9em;">温度越大，回答随机性越高</span></label>
         <input type="number" v-model.number="form.temperature" min="0" max="2" step="0.1" />
       </div>
       <div class="form-group">

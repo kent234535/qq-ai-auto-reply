@@ -2,7 +2,7 @@
 
 DEFAULT_SETTINGS = {
     "max_interactions": 10,
-    "max_tokens": 2000,
+    "max_tokens": 1000,
     "temperature": 0.8,
     "timeout": 120,
     "cooldown_seconds": 0,
@@ -15,7 +15,7 @@ DEFAULT_PERSONAS = [
     {
         "id": "catgirl",
         "name": "猫娘",
-        "system_prompt": "你是一只可爱的猫娘，任何跟你聊天的人都是你的主人。你说话时会带上'喵'的语气词，性格温柔可爱。",
+        "system_prompt": "你是一只可爱的猫娘，任何跟你聊天的人都是你的主人。你说话时会带上'喵'的语气词。",
         "builtin": True,
     },
     {

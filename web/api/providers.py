@@ -120,6 +120,15 @@ async def list_available_models(body: ListModelsRequest):
         raise HTTPException(502, f"Connection failed: {e}")
 
 
+@router.get("/{provider_id}/raw-key")
+async def get_provider_raw_key(provider_id: str):
+    """Return the unmasked API key for editing."""
+    p = config.get_provider(provider_id)
+    if not p:
+        raise HTTPException(404, "provider not found")
+    return {"api_key": p.get("api_key", "")}
+
+
 @router.get("/{provider_id}/models")
 async def list_provider_models(provider_id: str):
     """Use stored credentials to list available models for an existing provider."""

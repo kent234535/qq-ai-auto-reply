@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { listProviders, createProvider, updateProvider, deleteProvider, testProviderModel, getSettings, updateSettings } from '@/api/client'
+import { listProviders, createProvider, updateProvider, deleteProvider, getProviderRawKey, testProviderModel, getSettings, updateSettings } from '@/api/client'
 
 const providers = ref<any[]>([])
 const activeProviderId = ref('')
@@ -61,17 +61,21 @@ async function activate(id: string) {
   activeProviderId.value = id
 }
 
-function startEdit(p: any) {
+async function startEdit(p: any) {
   editingId.value = p.id
   editForm.value = {
     name: p.name,
     type: p.type,
     base_url: p.base_url || '',
-    api_key: p.api_key || '',
+    api_key: '',
     model: p.model || '',
   }
   testResult.value = null
   testingId.value = ''
+  try {
+    const { data } = await getProviderRawKey(p.id)
+    editForm.value.api_key = data.api_key || ''
+  } catch {}
 }
 
 function cancelEdit() {

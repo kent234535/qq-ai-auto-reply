@@ -20,6 +20,7 @@ export const listAvailableModels = (data: Record<string, unknown>) =>
   api.post('/providers/list-models', data, { timeout: 20000 })
 export const listProviderModels = (id: string) =>
   api.get(`/providers/${id}/models`, { timeout: 20000 })
+export const getProviderRawKey = (id: string) => api.get(`/providers/${id}/raw-key`)
 export const testProviderModel = (id: string, data?: Record<string, unknown>) =>
   api.post(`/providers/${id}/test`, data || null, { timeout: 20000 })
 

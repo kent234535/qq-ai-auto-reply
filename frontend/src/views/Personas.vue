@@ -5,7 +5,7 @@ import { listPersonas, createPersona, updatePersona, deletePersona, getSettings,
 const personas = ref<any[]>([])
 const activePersonaId = ref('')
 const showForm = ref(false)
-const form = ref({ id: '', name: '', system_prompt: '' })
+const form = ref({ name: '', system_prompt: '' })
 
 const editingId = ref('')
 const editForm = ref({ name: '', system_prompt: '' })
@@ -17,11 +17,11 @@ async function load() {
 }
 
 function resetForm() {
-  form.value = { id: '', name: '', system_prompt: '' }
+  form.value = { name: '', system_prompt: '' }
 }
 
 async function save() {
-  if (!form.value.id || !form.value.name || !form.value.system_prompt) return
+  if (!form.value.name || !form.value.system_prompt) return
   await createPersona(form.value)
   showForm.value = false
   resetForm()
@@ -76,10 +76,6 @@ onMounted(load)
 
     <div v-if="showForm" class="card">
       <div class="form-group">
-        <label>ID（唯一标识）</label>
-        <input v-model="form.id" placeholder="如 tsundere" />
-      </div>
-      <div class="form-group">
         <label>名称</label>
         <input v-model="form.name" placeholder="如 傲娇少女" />
       </div>
@@ -95,7 +91,6 @@ onMounted(load)
         <div>
           <strong>{{ p.name }}</strong>
           <span v-if="activePersonaId === p.id" class="badge badge-green" style="margin-left: 8px;">当前启用</span>
-          <span v-if="p.builtin" class="badge badge-gray" style="margin-left: 4px;">内置</span>
         </div>
         <div style="display: flex; gap: 8px;">
           <button v-if="activePersonaId !== p.id" class="btn btn-success btn-sm" @click="activate(p.id)">启用</button>
