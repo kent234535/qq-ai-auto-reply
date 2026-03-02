@@ -340,15 +340,37 @@ async def start_napcat():
         return {"ok": False, "message": str(e)}
 
     # Step 4: 等待 WebUI 就绪（最多 40 秒）
+    webui_ready = False
     for _ in range(20):
         await asyncio.sleep(2)
         if await _check_webui_reachable(base_url):
-            return {"ok": True, "message": "NapCat 启动成功，WebUI 已就绪"}
+            webui_ready = True
+            break
 
-    if _is_qq_running():
-        return {"ok": True, "message": "QQ 已启动，WebUI 尚未就绪（请在 QQ 窗口确认登录后刷新）"}
+    if not webui_ready:
+        if _is_qq_running():
+            return {"ok": True, "message": "QQ 已启动，WebUI 尚未就绪（请在 QQ 窗口确认登录后刷新）"}
+        return {"ok": False, "message": "启动超时，QQ 进程未检测到"}
 
-    return {"ok": False, "message": "启动超时，QQ 进程未检测到"}
+    # Step 5: WebUI 就绪后，等待 QQ 登录完成（最多再等 20 秒）
+    config = _load_webui_config()
+    token = str(config.get("token", "") or "")
+    if token:
+        async with httpx.AsyncClient(timeout=5) as client:
+            credential, _ = await _get_credential(client, base_url, token)
+            if credential:
+                for _ in range(10):
+                    resp = await _napcat_api(
+                        client, base_url,
+                        "/api/QQLogin/CheckLoginStatus", credential,
+                    )
+                    if resp.get("code") == 0:
+                        d = resp.get("data") or {}
+                        if d.get("isLogin"):
+                            return {"ok": True, "message": "NapCat 启动成功，QQ 已登录"}
+                    await asyncio.sleep(2)
+
+    return {"ok": True, "message": "NapCat 启动成功，WebUI 已就绪（QQ 可能需要确认登录）"}
 
 
 @router.post("/stop")
@@ -436,6 +458,7 @@ async def proxy_qrcode():
 
 @router.get("/qrcode_image")
 async def get_qrcode_image():
+    
     """返回 NapCat 生成的二维码图片（png）"""
     p = _find_qrcode_image()
     if not p:

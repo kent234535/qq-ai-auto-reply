@@ -61,8 +61,8 @@ onMounted(fetchStatus)
       <div class="flex-between">
         <div>
           <strong>NapCat 状态</strong>
-          <span v-if="status" class="badge" :class="status.qq_login ? 'badge-green' : status.webui_reachable ? 'badge-green' : status.qq_running ? 'badge-gray' : 'badge-red'" style="margin-left: 8px;">
-            {{ status.qq_login ? 'QQ 已登录' : status.webui_reachable ? '运行中' : status.qq_running ? 'QQ 已启动，WebUI 未就绪' : '已停止' }}
+          <span v-if="status" class="badge" :class="status.qq_login === true ? 'badge-green' : status.webui_reachable ? 'badge-green' : status.qq_running ? 'badge-gray' : 'badge-red'" style="margin-left: 8px;">
+            {{ status.qq_login === true ? 'QQ 已登录' : status.webui_reachable ? (status.qq_login === false ? '运行中（QQ 未登录）' : '运行中') : status.qq_running ? 'QQ 已启动，WebUI 未就绪' : '已停止' }}
           </span>
         </div>
         <button class="btn btn-primary btn-sm" @click="fetchStatus">刷新</button>
@@ -80,8 +80,8 @@ onMounted(fetchStatus)
           </span>
         </div>
         <div>QQ 登录:
-          <span :style="{ color: status.qq_login ? '#2a9d8f' : status.qq_offline ? '#f4a261' : '#e63946', fontWeight: 600 }">
-            {{ status.qq_login ? '已登录' : status.qq_offline ? '离线' : '未登录' }}
+          <span :style="{ color: status.qq_login === true ? '#2a9d8f' : status.qq_offline ? '#f4a261' : status.webui_reachable && status.qq_login === null ? '#666' : '#e63946', fontWeight: 600 }">
+            {{ status.qq_login === true ? '已登录' : status.qq_offline ? '离线' : status.webui_reachable && status.qq_login === null ? '检测中...' : '未登录' }}
           </span>
         </div>
         <div v-if="status.login_error">登录提示: {{ status.login_error }}</div>
