@@ -45,6 +45,9 @@ elif _IS_WIN:
     _NAPCAT_LOADER_CANDIDATES = [
         Path.home() / "Documents/loadNapCat.js",
         Path.home() / "AppData/Local/NapCat/loadNapCat.js",
+        Path.home() / "AppData/Roaming/NapCat/loadNapCat.js",
+        Path(os.path.expandvars(r"%ProgramFiles%\NapCat\loadNapCat.js")),
+        Path(os.path.expandvars(r"%ProgramFiles(x86)%\NapCat\loadNapCat.js")),
     ]
 else:
     _NAPCAT_LOADER_CANDIDATES = [
@@ -84,6 +87,47 @@ def _check_napcat_mode(package_json: Path) -> bool:
         return False
 
 
+def _detect_qq_from_registry() -> list[str]:
+    """Windows: 从注册表 Uninstall 项中查找 QQ 安装路径"""
+    if not _IS_WIN:
+        return []
+    dirs: list[str] = []
+    try:
+        import winreg
+        for root_key in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+            for sub in (
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+                r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
+            ):
+                try:
+                    key = winreg.OpenKey(root_key, sub)
+                except OSError:
+                    continue
+                try:
+                    i = 0
+                    while True:
+                        try:
+                            subkey_name = winreg.EnumKey(key, i)
+                            i += 1
+                        except OSError:
+                            break
+                        if "QQ" not in subkey_name.upper():
+                            continue
+                        try:
+                            sk = winreg.OpenKey(key, subkey_name)
+                            loc, _ = winreg.QueryValueEx(sk, "InstallLocation")
+                            winreg.CloseKey(sk)
+                            if loc and os.path.isdir(loc):
+                                dirs.append(loc)
+                        except OSError:
+                            pass
+                finally:
+                    winreg.CloseKey(key)
+    except Exception:
+        pass
+    return dirs
+
+
 def _detect_all_qq_apps() -> list[dict]:
     """扫描本机所有 QQ 应用，返回列表。"""
     apps: list[dict] = []
@@ -109,6 +153,8 @@ def _detect_all_qq_apps() -> list[dict]:
             os.path.expandvars(r"%LOCALAPPDATA%\Programs\Tencent\QQNT"),
             os.path.expandvars(r"%LOCALAPPDATA%\Tencent\QQNT"),
         ]
+        # 从 Windows 注册表探测 QQ 安装路径
+        _WIN_QQ_DIRS.extend(_detect_qq_from_registry())
         seen: set[str] = set()
         for d in _WIN_QQ_DIRS:
             d = os.path.normpath(d)
@@ -333,7 +379,8 @@ def _enable_napcat(pkg_path: Path) -> tuple[bool, str]:
     try:
         pkg_path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     except PermissionError:
-        return False, f"没有权限修改 {pkg_path}，请检查文件权限"
+        hint = "请以管理员身份运行" if _IS_WIN else "请检查文件权限"
+        return False, f"没有权限修改 {pkg_path}，{hint}"
     except Exception as e:
         return False, f"写入 package.json 失败: {e}"
 
@@ -524,7 +571,7 @@ def _get_qq_pids() -> list[int]:
     try:
         if _IS_WIN:
             # 优先 PowerShell Get-CimInstance（wmic 在新版 Windows 可能不可用）
-            escaped = _active_exe.replace("\\", "\\\\")
+            escaped = _active_exe.replace("\\", "\\\\").replace("'", "''")
             try:
                 result = subprocess.run(
                     ["powershell", "-NoProfile", "-Command",
@@ -688,9 +735,8 @@ async def connect_napcat():
     if not _active_exe:
         return {"ok": False, "message": "未检测到 QQ 应用，请先安装 QQ"}
 
-    base_url = _get_webui_base()
-
     # 已连接则直接返回
+    base_url = _get_webui_base()
     if await _check_webui_reachable(base_url):
         config = _load_webui_config()
         token = str(config.get("token", "") or "")
@@ -728,8 +774,11 @@ async def connect_napcat():
 
     # 启动 QQ
     try:
+        qq_cmd = [_active_exe]
+        if not _IS_WIN:
+            qq_cmd.append("--no-sandbox")
         subprocess.Popen(
-            [_active_exe, "--no-sandbox"],
+            qq_cmd,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -744,9 +793,11 @@ async def connect_napcat():
         return {"ok": False, "message": f"启动 QQ 失败: {e}"}
 
     # 等待 WebUI 就绪（最多 40 秒）
+    # 每轮重新读取 webui.json，因为 NapCat 启动后可能才写入/更新配置
     for _ in range(20):
         await asyncio.sleep(2)
-        if await _check_webui_reachable(base_url):
+        cur_base = _get_webui_base()
+        if await _check_webui_reachable(cur_base):
             # 确保 OneBot11 配置正确（自动为所有账号配置消息转发）
             _enable_onebot11_ws()
             return await _fetch_qrcode_result()
