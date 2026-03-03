@@ -13,4 +13,3 @@ class BotSettings(BaseModel):
     max_context_messages: int = Field(20, ge=2, description="保留的最大上下文消息数")
     active_provider_id: str = Field("", description="当前使用的 AI 提供商 ID")
     active_persona_id: str = Field("catgirl", description="当前使用的角色 ID")
-    qq_account: str = Field("", description="QQ 账号（留空则启动时不指定）")

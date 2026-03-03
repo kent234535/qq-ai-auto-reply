@@ -9,7 +9,6 @@ DEFAULT_SETTINGS = {
     "max_context_messages": 20,
     "active_provider_id": "",
     "active_persona_id": "catgirl",
-    "qq_account": "",
 }
 
 DEFAULT_PERSONAS = [

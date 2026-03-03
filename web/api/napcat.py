@@ -7,33 +7,59 @@ import hashlib
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 
 import httpx
 
-from config import config as app_config
-
 router = APIRouter()
 
-QQ_APP_PATH = "/Applications/QQ.app/Contents/MacOS/QQ"
-QQ_PACKAGE_JSON = Path("/Applications/QQ.app/Contents/Resources/app/package.json")
+# ─── 平台常量 ───
+
+_IS_WIN = sys.platform == "win32"
+_IS_MAC = sys.platform == "darwin"
+
+if _IS_WIN:
+    _QQ_INSTALL_DIR = Path(r"C:\Program Files\Tencent\QQNT")
+    QQ_APP_PATH = str(_QQ_INSTALL_DIR / "QQ.exe")
+    QQ_PACKAGE_JSON = _QQ_INSTALL_DIR / "resources" / "app" / "package.json"
+    _WEBUI_CONFIG_CANDIDATES = [
+        Path.home() / "AppData/Local/NapCat/config/webui.json",
+        Path.home() / "AppData/Roaming/NapCat/config/webui.json",
+    ]
+    _QRCODE_IMAGE_CANDIDATES = [
+        Path.home() / "AppData/Local/NapCat/cache/qrcode.png",
+        Path.home() / "AppData/Roaming/NapCat/cache/qrcode.png",
+    ]
+elif _IS_MAC:
+    QQ_APP_PATH = "/Applications/QQ.app/Contents/MacOS/QQ"
+    QQ_PACKAGE_JSON = Path("/Applications/QQ.app/Contents/Resources/app/package.json")
+    _WEBUI_CONFIG_CANDIDATES = [
+        Path.home() / "Library/Application Support/QQ/NapCat/config/webui.json",
+        Path.home() / "Library/Containers/com.tencent.qq/Data/Library/Application Support/QQ/NapCat/config/webui.json",
+    ]
+    _QRCODE_IMAGE_CANDIDATES = [
+        Path.home() / "Library/Application Support/QQ/NapCat/cache/qrcode.png",
+        Path.home() / "Library/Containers/com.tencent.qq/Data/Library/Application Support/QQ/NapCat/cache/qrcode.png",
+    ]
+else:
+    # Linux 兜底
+    QQ_APP_PATH = "/opt/QQ/qq"
+    QQ_PACKAGE_JSON = Path("/opt/QQ/resources/app/package.json")
+    _WEBUI_CONFIG_CANDIDATES = [
+        Path.home() / ".config/NapCat/config/webui.json",
+    ]
+    _QRCODE_IMAGE_CANDIDATES = [
+        Path.home() / ".config/NapCat/cache/qrcode.png",
+    ]
 
 PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
 NAPCAT_PACKAGE = PROJECT_DIR / "package.json.napcat"
 ORIGINAL_PACKAGE = PROJECT_DIR / "package.json.original"
-
-# webui.json 路径（NapCat 实际写入非容器路径，优先读取）
-_WEBUI_CONFIG_CANDIDATES = [
-    Path.home() / "Library/Application Support/QQ/NapCat/config/webui.json",
-    Path.home() / "Library/Containers/com.tencent.qq/Data/Library/Application Support/QQ/NapCat/config/webui.json",
-]
-_QRCODE_IMAGE_CANDIDATES = [
-    Path.home() / "Library/Application Support/QQ/NapCat/cache/qrcode.png",
-    Path.home() / "Library/Containers/com.tencent.qq/Data/Library/Application Support/QQ/NapCat/cache/qrcode.png",
-]
 
 
 def _parse_bool(value: object) -> bool:
@@ -60,14 +86,15 @@ def _is_napcat_mode() -> bool:
 
 
 def _switch_to_napcat() -> tuple[bool, str]:
-    """切换 QQ 到 NapCat 模式：替换 package.json + 重签名"""
+    """切换 QQ 到 NapCat 模式：替换 package.json + 重签名（macOS）"""
     if not NAPCAT_PACKAGE.exists():
         return False, f"NapCat package.json 不存在: {NAPCAT_PACKAGE}"
     try:
         shutil.copy2(NAPCAT_PACKAGE, QQ_PACKAGE_JSON)
-        errors = _codesign_and_xattr()
-        if errors:
-            return False, f"package.json 已替换，但签名失败: {errors}"
+        if _IS_MAC:
+            errors = _codesign_and_xattr()
+            if errors:
+                return False, f"package.json 已替换，但签名失败: {errors}"
         return True, "已切换到 NapCat 模式"
     except Exception as e:
         return False, f"切换失败: {e}"
@@ -79,16 +106,19 @@ def _switch_to_normal() -> tuple[bool, str]:
         return False, f"原版 package.json 不存在: {ORIGINAL_PACKAGE}"
     try:
         shutil.copy2(ORIGINAL_PACKAGE, QQ_PACKAGE_JSON)
-        errors = _codesign_and_xattr()
-        if errors:
-            return False, f"package.json 已恢复，但签名失败: {errors}"
+        if _IS_MAC:
+            errors = _codesign_and_xattr()
+            if errors:
+                return False, f"package.json 已恢复，但签名失败: {errors}"
         return True, "已切换回普通模式"
     except Exception as e:
         return False, f"切换失败: {e}"
 
 
 def _codesign_and_xattr() -> str:
-    """执行 codesign + xattr，返回错误信息（空字符串表示成功）"""
+    """macOS: 执行 codesign + xattr，返回错误信息（空字符串表示成功）"""
+    if not _IS_MAC:
+        return ""
     errors = []
     r1 = subprocess.run(
         ["codesign", "--force", "--deep", "--sign", "-", "/Applications/QQ.app"],
@@ -232,38 +262,40 @@ def _build_qrcode_payload(qrcode_url: str = "", message: str = "") -> dict:
 def _is_qq_running() -> bool:
     """检查是否有任何 QQ 进程在运行"""
     try:
-        result = subprocess.run(
-            ["pgrep", "-f", "QQ.app"],
-            capture_output=True, text=True, timeout=3,
-        )
-        return bool(result.stdout.strip())
+        if _IS_WIN:
+            result = subprocess.run(
+                ["tasklist", "/FI", "IMAGENAME eq QQ.exe", "/NH"],
+                capture_output=True, text=True, timeout=5,
+            )
+            return "QQ.exe" in result.stdout
+        else:
+            result = subprocess.run(
+                ["pgrep", "-f", "QQ.app" if _IS_MAC else "QQ"],
+                capture_output=True, text=True, timeout=3,
+            )
+            return bool(result.stdout.strip())
     except Exception:
         return False
 
 
-def _find_napcat_main_pid() -> int | None:
-    """查找 QQ 主进程 PID（不含 Helper/Renderer 子进程）"""
-    try:
-        result = subprocess.run(
-            ["pgrep", "-f", "QQ.app/Contents/MacOS/QQ$"],
-            capture_output=True, text=True, timeout=3,
-        )
-        pids = [int(p) for p in result.stdout.strip().split("\n") if p.strip()]
-        return pids[0] if pids else None
-    except Exception:
-        return None
-
-
 def _kill_all_qq() -> None:
     """杀掉所有 QQ 相关进程"""
-    subprocess.run(["pkill", "-f", "QQ.app"], capture_output=True, timeout=5)
-    subprocess.run(["pkill", "-f", "QQEXDOC"], capture_output=True, timeout=5)
+    if _IS_WIN:
+        subprocess.run(["taskkill", "/F", "/IM", "QQ.exe"], capture_output=True, timeout=5)
+    else:
+        subprocess.run(["pkill", "-f", "QQ.app" if _IS_MAC else "QQ"], capture_output=True, timeout=5)
+        if _IS_MAC:
+            subprocess.run(["pkill", "-f", "QQEXDOC"], capture_output=True, timeout=5)
 
 
 def _force_kill_all_qq() -> None:
     """强制杀掉所有 QQ 残留进程"""
-    subprocess.run(["pkill", "-9", "-f", "QQ.app"], capture_output=True, timeout=5)
-    subprocess.run(["pkill", "-9", "-f", "QQEXDOC"], capture_output=True, timeout=5)
+    if _IS_WIN:
+        subprocess.run(["taskkill", "/F", "/T", "/IM", "QQ.exe"], capture_output=True, timeout=5)
+    else:
+        subprocess.run(["pkill", "-9", "-f", "QQ.app" if _IS_MAC else "QQ"], capture_output=True, timeout=5)
+        if _IS_MAC:
+            subprocess.run(["pkill", "-9", "-f", "QQEXDOC"], capture_output=True, timeout=5)
 
 
 async def _ensure_qq_killed() -> bool:
@@ -280,9 +312,13 @@ async def _ensure_qq_killed() -> bool:
 
 # ─── API 路由 ───
 
+class StartRequest(BaseModel):
+    qq_account: str = ""
+
+
 @router.get("/status")
 async def napcat_status():
-    """获取 NapCat 状态"""
+    """获取消息代理状态"""
     napcat_mode = _is_napcat_mode()
     qq_running = _is_qq_running()
 
@@ -320,13 +356,17 @@ async def napcat_status():
 
 
 @router.post("/start")
-async def start_napcat():
-    """一键启动 NapCat：杀全部 QQ → 切换模式 → 启动"""
+async def start_napcat(body: StartRequest | None = None):
+    """一键启动消息代理服务：杀全部 QQ → 切换模式 → 启动"""
+    qq_account = ((body and body.qq_account) or "").strip()
+    if not qq_account:
+        return {"ok": False, "message": "请填写 QQ 账号"}
+
     base_url = _get_webui_base()
 
     # 已经 WebUI 可达 → 不重复操作
     if await _check_webui_reachable(base_url):
-        return {"ok": True, "message": "NapCat 已在运行且 WebUI 可达"}
+        return {"ok": True, "message": "消息代理已在运行，WebUI 可达"}
 
     # Step 1: 彻底杀掉所有 QQ 进程
     if _is_qq_running():
@@ -342,10 +382,7 @@ async def start_napcat():
 
     # Step 3: 启动 QQ --no-sandbox
     try:
-        cmd = [QQ_APP_PATH, "--no-sandbox"]
-        qq_account = (app_config.settings.qq_account or "").strip()
-        if qq_account:
-            cmd.extend(["-q", qq_account])
+        cmd = [QQ_APP_PATH, "--no-sandbox", "-q", qq_account]
         subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
@@ -366,42 +403,24 @@ async def start_napcat():
 
     if not webui_ready:
         if _is_qq_running():
-            return {"ok": True, "message": "QQ 已启动，WebUI 尚未就绪（请在 QQ 窗口确认登录后刷新）"}
+            return {"ok": True, "message": "QQ 已启动，消息代理 WebUI 尚未就绪（请稍后刷新）"}
         return {"ok": False, "message": "启动超时，QQ 进程未检测到"}
 
-    # Step 5: WebUI 就绪后，等待 QQ 登录完成（最多再等 20 秒）
-    config = _load_webui_config()
-    token = str(config.get("token", "") or "")
-    if token:
-        async with httpx.AsyncClient(timeout=5) as client:
-            credential, _ = await _get_credential(client, base_url, token)
-            if credential:
-                for _ in range(10):
-                    resp = await _napcat_api(
-                        client, base_url,
-                        "/api/QQLogin/CheckLoginStatus", credential,
-                    )
-                    if resp.get("code") == 0:
-                        d = resp.get("data") or {}
-                        if _parse_bool(d.get("isLogin")):
-                            return {"ok": True, "message": "NapCat 启动成功，QQ 已登录"}
-                    await asyncio.sleep(2)
-
-    return {"ok": True, "message": "NapCat 启动成功，WebUI 已就绪（QQ 可能需要确认登录）"}
+    return {"ok": True, "message": "消息代理启动成功，WebUI 已就绪"}
 
 
 @router.post("/stop")
 async def stop_napcat():
-    """停止 NapCat 并切换回普通模式"""
+    """停止消息代理并切换回普通模式"""
     if not _is_qq_running() and not await _check_webui_reachable():
-        return {"ok": True, "message": "NapCat 未在运行"}
+        return {"ok": True, "message": "消息代理未在运行"}
 
     killed = await _ensure_qq_killed()
     if not killed:
         return {"ok": False, "message": "无法完全关闭 QQ 进程"}
 
     ok, msg = _switch_to_normal()
-    return {"ok": ok, "message": f"NapCat 已停止。{msg}"}
+    return {"ok": ok, "message": f"消息代理已停止。{msg}"}
 
 
 @router.get("/qrcode")
@@ -411,7 +430,7 @@ async def proxy_qrcode():
     base_url = _get_webui_base(config)
 
     if not await _check_webui_reachable(base_url):
-        return {"ok": False, "message": "NapCat WebUI 不可达，请先启动 NapCat"}
+        return {"ok": False, "message": "消息代理 WebUI 不可达，请先启动消息代理服务"}
 
     token = str(config.get("token", "") or "")
     async with httpx.AsyncClient(timeout=8) as client:
@@ -475,9 +494,8 @@ async def proxy_qrcode():
 
 @router.get("/qrcode_image")
 async def get_qrcode_image():
-    
     """返回 NapCat 生成的二维码图片（png）"""
     p = _find_qrcode_image()
     if not p:
-        return {"ok": False, "message": "二维码图片不存在，请先点击“获取登录二维码”"}
+        return {"ok": False, "message": "二维码图片不存在，请先获取登录二维码"}
     return FileResponse(str(p), media_type="image/png", filename="qrcode.png")

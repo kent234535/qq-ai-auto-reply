@@ -19,7 +19,6 @@ class SettingsUpdate(BaseModel):
     max_context_messages: int | None = Field(None, ge=2)
     active_provider_id: str | None = None
     active_persona_id: str | None = None
-    qq_account: str | None = None
 
 
 @router.get("")
