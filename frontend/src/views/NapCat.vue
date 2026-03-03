@@ -10,7 +10,6 @@ let pollTimer: ReturnType<typeof setInterval> | null = null
 
 const connected = computed(() => status.value?.connected === true)
 const webuiReady = computed(() => status.value?.webui_reachable === true)
-const isMultiMode = computed(() => status.value?.mode === 'multi')
 const apps = computed(() => status.value?.apps || [])
 const activeExe = computed(() => status.value?.active_exe || '')
 const napcatInstalled = computed(() => status.value?.napcat_installed !== false)
@@ -79,7 +78,10 @@ async function doRefreshQR() {
 }
 
 async function doSwitchApp(exe: string) {
+  if (exe === activeExe.value) return
   loading.value = true
+  qrcode.value = null
+  msg.value = ''
   try {
     const { data } = await setNapCatApp(exe)
     msg.value = data.message || ''
@@ -116,21 +118,18 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 多 App 模式：显示选择器 -->
-      <div v-if="isMultiMode" style="margin-top: 12px;">
-        <label style="font-size: 0.85em; color: #666;">选择 QQ 应用</label>
+      <!-- QQ 应用选择 -->
+      <div v-if="apps.length > 0" style="margin-top: 12px;">
+        <label style="font-size: 0.85em; color: #666;">QQ 应用</label>
         <div class="flex gap-8 mt-10" style="flex-wrap: wrap;">
           <button v-for="app in apps" :key="app.exe"
             class="btn btn-sm"
             :class="app.exe === activeExe ? 'btn-primary' : 'btn-outline'"
-            :disabled="loading || connected"
+            :disabled="loading"
             :title="app.exe"
             @click="doSwitchApp(app.exe)">
             {{ app.name }}
           </button>
-        </div>
-        <div v-if="connected" style="font-size: 0.8em; color: #888; margin-top: 4px;">
-          连接中不可切换，请先断开
         </div>
       </div>
     </div>

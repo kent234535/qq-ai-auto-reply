@@ -483,7 +483,6 @@ async def napcat_status():
         "login_error": login_error,
         "active_exe": _active_exe,
         "apps": _all_qq_apps,
-        "mode": "single" if len(_all_qq_apps) <= 1 else "multi",
         "napcat_installed": _find_napcat_loader() is not None,
     }
 
@@ -503,8 +502,13 @@ async def set_active_app(body: SetAppRequest):
     if not valid:
         return {"ok": False, "message": f"无效的 QQ 路径: {exe}"}
 
+    # 如果当前有连接，自动断开再切换
     if _is_qq_running() or await _check_webui_reachable():
-        return {"ok": False, "message": "请先断开当前连接再切换"}
+        # 恢复当前 App 的 package.json
+        old_pkg = _get_active_pkg()
+        if old_pkg:
+            _disable_napcat(old_pkg)
+        await _ensure_qq_killed()
 
     _active_exe = exe
     return {"ok": True, "message": f"已切换到: {exe}"}
