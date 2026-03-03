@@ -116,6 +116,8 @@ _all_qq_apps = _detect_all_qq_apps()
 _active_exe: str = _all_qq_apps[0]["exe"] if _all_qq_apps else ""
 # 记住被修改过的 package.json 的原始 main 值，断开时恢复
 _original_main: dict[str, str] = {}
+# NoneBot2 的 WebSocket 地址（NapCat 需要连接到这里）
+_NONEBOT_WS = "ws://127.0.0.1:8080/onebot/v11/ws"
 
 _WEBUI_CONFIG_CANDIDATES: list[Path]
 _QRCODE_IMAGE_CANDIDATES: list[Path]
@@ -145,6 +147,70 @@ else:
     _QRCODE_IMAGE_CANDIDATES = [
         Path.home() / ".config/NapCat/cache/qrcode.png",
     ]
+
+
+# ─── NapCat OneBot11 配置自动修复 ───
+
+_NAPCAT_CONFIG_DIRS: list[Path] = []
+if _IS_MAC:
+    _NAPCAT_CONFIG_DIRS = [
+        Path.home() / "Library/Application Support/QQ/NapCat/config",
+        Path.home() / "Library/Containers/com.tencent.qq/Data/Library/Application Support/QQ/NapCat/config",
+    ]
+elif _IS_WIN:
+    _NAPCAT_CONFIG_DIRS = [
+        Path.home() / "AppData/Local/NapCat/config",
+        Path.home() / "AppData/Roaming/NapCat/config",
+    ]
+else:
+    _NAPCAT_CONFIG_DIRS = [
+        Path.home() / ".config/NapCat/config",
+    ]
+
+
+def _ensure_onebot11_config() -> str:
+    """检查所有 NapCat onebot11 配置文件，确保 WebSocket 客户端指向 NoneBot2。
+    返回修复信息（空字符串表示无需修复）。"""
+    fixed: list[str] = []
+    for config_dir in _NAPCAT_CONFIG_DIRS:
+        if not config_dir.exists():
+            continue
+        for f in config_dir.glob("onebot11_*.json"):
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            network = data.get("network", {})
+            ws_clients = network.get("websocketClients", [])
+
+            # 检查是否已有指向 NoneBot2 的配置
+            has_nonebot = any(
+                c.get("url") == _NONEBOT_WS and c.get("enable")
+                for c in ws_clients
+            )
+            if has_nonebot:
+                continue
+
+            # 添加 WebSocket 客户端配置
+            ws_clients.append({
+                "enable": True,
+                "url": _NONEBOT_WS,
+                "reconnectIntervalMs": 5000,
+                "heartIntervalMs": 30000,
+                "accessToken": "",
+            })
+            network["websocketClients"] = ws_clients
+            data["network"] = network
+            try:
+                f.write_text(
+                    json.dumps(data, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                qq_num = f.stem.replace("onebot11_", "")
+                fixed.append(qq_num)
+            except Exception:
+                pass
+    return f"已为账号 {', '.join(fixed)} 配置消息转发" if fixed else ""
 
 
 # ─── NapCat 模式切换（修改 package.json 的 main 字段） ───
@@ -475,6 +541,10 @@ async def napcat_status():
 
     connected = webui_reachable and qq_login
 
+    # QQ 登录后自动确保 OneBot11 配置正确
+    if qq_login:
+        _ensure_onebot11_config()
+
     return {
         "connected": connected,
         "webui_reachable": webui_reachable,
@@ -579,6 +649,8 @@ async def connect_napcat():
     for _ in range(20):
         await asyncio.sleep(2)
         if await _check_webui_reachable(base_url):
+            # 确保 OneBot11 配置正确（自动为所有账号配置消息转发）
+            _ensure_onebot11_config()
             return await _fetch_qrcode_result()
 
     if _is_qq_running():
