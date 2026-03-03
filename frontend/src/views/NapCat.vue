@@ -13,6 +13,7 @@ const webuiReady = computed(() => status.value?.webui_reachable === true)
 const isMultiMode = computed(() => status.value?.mode === 'multi')
 const apps = computed(() => status.value?.apps || [])
 const activeExe = computed(() => status.value?.active_exe || '')
+const napcatInstalled = computed(() => status.value?.napcat_installed !== false)
 
 async function fetchStatus() {
   try {
@@ -122,11 +123,10 @@ onUnmounted(() => {
           <button v-for="app in apps" :key="app.exe"
             class="btn btn-sm"
             :class="app.exe === activeExe ? 'btn-primary' : 'btn-outline'"
-            :disabled="loading || connected || !app.napcat"
-            :title="app.napcat ? app.exe : '未配置 NapCat'"
+            :disabled="loading || connected"
+            :title="app.exe"
             @click="doSwitchApp(app.exe)">
             {{ app.name }}
-            <span v-if="!app.napcat" style="font-size: 0.8em; opacity: 0.6;">（未配置）</span>
           </button>
         </div>
         <div v-if="connected" style="font-size: 0.8em; color: #888; margin-top: 4px;">
@@ -138,15 +138,15 @@ onUnmounted(() => {
     <!-- 操作卡片 -->
     <div class="card">
       <div class="flex gap-8">
-        <button v-if="!webuiReady" class="btn btn-success" :disabled="loading" @click="doConnect">
+        <button v-if="!connected" class="btn btn-success" :disabled="loading || !napcatInstalled" @click="doConnect">
           连接
         </button>
-        <button v-else-if="!connected" class="btn btn-success" :disabled="loading" @click="doConnect">
-          连接
-        </button>
-        <button v-if="webuiReady" class="btn btn-danger" :disabled="loading" @click="doDisconnect">
+        <button v-if="webuiReady || connected" class="btn btn-danger" :disabled="loading" @click="doDisconnect">
           断开连接
         </button>
+      </div>
+      <div v-if="!napcatInstalled" style="margin-top: 8px; color: #e63946; font-size: 0.85em;">
+        未检测到 NapCat，请先安装 NapCat
       </div>
       <div v-if="msg" style="margin-top: 10px; color: #555; white-space: pre-line;">{{ msg }}</div>
     </div>
