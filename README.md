@@ -255,6 +255,18 @@ npm run build    # 构建到 web/frontend/dist/
 
 ---
 
+## 安全与公开仓库
+
+为避免泄露风险，建议按以下规则使用：
+
+1. **不要提交 `.env` 和 `data/`**：API Key 会保存在 `data/providers.json`，属于敏感信息。
+2. **默认仅本机可访问 API**：项目默认拒绝远程访问 `/api/*`（防止误暴露后被调用）。
+3. **如需远程访问**：在环境变量设置 `ALLOW_REMOTE_WEB=1`，并务必在反向代理层加鉴权（如 Basic Auth / OAuth / IP 白名单）。
+4. **公开前自检**：执行 `git status --short`，确认没有 `data/*.json`、`.env`、私钥文件等待提交。
+5. **密钥轮换**：如果历史上曾提交过 API Key，请在提供商后台立即重置密钥。
+
+---
+
 ## 致谢
 
 - **[NoneBot2](https://github.com/nonebot/nonebot2)** — 跨平台 Python 异步机器人框架

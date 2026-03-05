@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import ipaddress
 import re
+import socket
 from urllib.parse import urlparse
 from uuid import uuid4
+from typing import Union
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -14,6 +16,52 @@ from pydantic import BaseModel
 from config import config
 
 router = APIRouter()
+
+
+IPAddress = Union[ipaddress.IPv4Address, ipaddress.IPv6Address]
+
+
+def _is_forbidden_ip(ip: IPAddress) -> bool:
+    return (
+        ip.is_private
+        or ip.is_loopback
+        or ip.is_link_local
+        or ip.is_multicast
+        or ip.is_reserved
+        or ip.is_unspecified
+    )
+
+
+def _assert_not_internal_target(hostname: str, port: int) -> None:
+    """Reject targets resolving to loopback/private/internal addresses."""
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if _is_forbidden_ip(ip):
+            raise HTTPException(400, "Base URL 不允许指向内网地址")
+        return
+    except ValueError:
+        pass
+
+    lowered = hostname.lower().rstrip(".")
+    if lowered.endswith((".local", ".internal", ".lan", ".home.arpa")):
+        raise HTTPException(400, "Base URL 不允许指向内网域名")
+
+    try:
+        infos = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    except socket.gaierror:
+        raise HTTPException(400, "Base URL 域名无法解析")
+
+    resolved_ips = {item[4][0] for item in infos if item and len(item) >= 5}
+    if not resolved_ips:
+        raise HTTPException(400, "Base URL 域名无法解析")
+
+    for addr in resolved_ips:
+        try:
+            ip = ipaddress.ip_address(addr)
+        except ValueError:
+            continue
+        if _is_forbidden_ip(ip):
+            raise HTTPException(400, "Base URL 不允许指向内网地址")
 
 
 def _validate_base_url(url: str) -> None:
@@ -26,17 +74,14 @@ def _validate_base_url(url: str) -> None:
     hostname = parsed.hostname or ""
     if not hostname:
         raise HTTPException(400, "Base URL 格式不正确")
-    # 禁止 localhost 和内网地址
-    if hostname in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
+    # 先拦截明显本地地址，再做 DNS 解析后的地址校验
+    if hostname.lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0"):
         raise HTTPException(400, "Base URL 不允许指向本地地址")
-    try:
-        ip = ipaddress.ip_address(hostname)
-        if ip.is_private or ip.is_loopback or ip.is_link_local:
-            raise HTTPException(400, "Base URL 不允许指向内网地址")
-    except ValueError:
-        # hostname 不是 IP，是域名，检查常见内网域名
-        if hostname.endswith(".local") or hostname.endswith(".internal"):
-            raise HTTPException(400, "Base URL 不允许指向内网地址")
+
+    port = parsed.port
+    if port is None:
+        port = 443 if parsed.scheme == "https" else 80
+    _assert_not_internal_target(hostname, port)
 
 
 def _mask_key(key: str) -> str:

@@ -1,11 +1,16 @@
 # Python
 __pycache__/
+.pycache/
 *.py[cod]
 *.egg-info/
 venv/
 .venv/
 
 # Environment
+.env
+.env.*
+!.env.example
+!.env.local.example
 .env.local
 
 # Runtime data
