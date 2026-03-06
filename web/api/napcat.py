@@ -605,7 +605,7 @@ async def _check_webui_reachable(base_url: str | None = None) -> bool:
     if base_url is None:
         base_url = _get_webui_base()
     try:
-        async with httpx.AsyncClient(timeout=2) as client:
+        async with httpx.AsyncClient(timeout=4) as client:
             resp = await client.post(f"{base_url}/api/auth/login", json={})
             if resp.status_code == 200:
                 data = resp.json()
@@ -619,11 +619,37 @@ def _token_hash(token: str) -> str:
     return hashlib.sha256(f"{token}.napcat".encode("utf-8")).hexdigest()
 
 
+# ─── Credential 缓存，避免每次轮询都重新认证 ───
+_cached_credential: str = ""
+_cached_credential_token: str = ""  # 对应的 token，token 变化时失效
+_onebot11_ws_configured: bool = False  # 标记本次连接是否已配置过 OneBot11 WS
+
+
 async def _get_credential(
     client: httpx.AsyncClient, base_url: str, token: str
 ) -> tuple[str | None, str]:
+    global _cached_credential, _cached_credential_token  # noqa: PLW0603
     if not token:
         return None, "NapCat WebUI 未配置 token，请检查 webui.json"
+
+    # 使用缓存的 credential（同一 token 下有效）
+    if _cached_credential and _cached_credential_token == token:
+        # 验证缓存是否仍然有效（轻量级请求）
+        try:
+            resp = await client.post(
+                f"{base_url}/api/QQLogin/CheckLoginStatus",
+                json={},
+                headers={"Authorization": f"Bearer {_cached_credential}"},
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("code") == 0:
+                    return _cached_credential, ""
+        except Exception:
+            pass
+        # 缓存失效，重新认证
+        _cached_credential = ""
+
     try:
         resp = await client.post(
             f"{base_url}/api/auth/login",
@@ -635,7 +661,9 @@ async def _get_credential(
         if data.get("code") == 0:
             credential = (data.get("data") or {}).get("Credential")
             if credential:
-                return str(credential), ""
+                _cached_credential = str(credential)
+                _cached_credential_token = token
+                return _cached_credential, ""
             return None, "NapCat WebUI 认证返回为空"
         return None, f"NapCat WebUI 认证失败: {data.get('message', '未知错误')}"
     except Exception as e:
@@ -788,17 +816,19 @@ async def napcat_status():
 
     config = _load_webui_config()
     base_url = _get_webui_base(config)
-    webui_reachable = await _check_webui_reachable(base_url)
+    token = str(config.get("token", "") or "")
 
+    webui_reachable = False
     qq_login = False
     login_error = ""
 
-    if webui_reachable:
-        token = str(config.get("token", "") or "")
-        if token:
+    # 用一个 client 完成可达性检查 + 登录状态查询，减少连接开销
+    if token:
+        try:
             async with httpx.AsyncClient(timeout=5) as client:
                 credential, _ = await _get_credential(client, base_url, token)
                 if credential:
+                    webui_reachable = True
                     resp = await _napcat_api(
                         client, base_url,
                         "/api/QQLogin/CheckLoginStatus", credential,
@@ -807,12 +837,17 @@ async def napcat_status():
                         d = resp.get("data") or {}
                         qq_login = _parse_bool(d.get("isLogin"))
                         login_error = str(d.get("loginError") or "")
+        except Exception:
+            pass
+    else:
+        webui_reachable = await _check_webui_reachable(base_url)
 
     connected = webui_reachable and qq_login
 
-    # QQ 登录后自动确保 OneBot11 配置正确
-    if qq_login:
-        await _enable_onebot11_ws_via_api()
+    # QQ 登录后仅首次自动配置 OneBot11 WS，避免每次轮询都发请求
+    if qq_login and not _onebot11_ws_configured:
+        if await _enable_onebot11_ws_via_api():
+            _onebot11_ws_configured = True
 
     return {
         "connected": connected,
@@ -841,6 +876,9 @@ async def set_active_app(body: SetAppRequest):
     if not valid:
         return {"ok": False, "message": f"无效的 QQ 路径: {exe}"}
 
+    global _onebot11_ws_configured, _cached_credential  # noqa: PLW0603
+    _onebot11_ws_configured = False
+    _cached_credential = ""
     # 如果当前有连接，自动断开再切换
     if _is_qq_running() or await _check_webui_reachable():
         old_pkg = _get_active_pkg()
@@ -856,6 +894,9 @@ async def set_active_app(body: SetAppRequest):
 @router.post("/connect")
 async def connect_napcat():
     """一键连接：配置 NapCat → 启动 QQ → 等待 WebUI → 获取二维码"""
+    global _onebot11_ws_configured, _cached_credential  # noqa: PLW0603
+    _onebot11_ws_configured = False
+    _cached_credential = ""
     if not _active_exe:
         return {"ok": False, "message": "未检测到 QQ 应用，请先安装 QQ"}
 
@@ -1000,6 +1041,9 @@ async def _fetch_qrcode_result() -> dict:
 @router.post("/disconnect")
 async def disconnect_napcat():
     """断开连接：停止 QQ → 恢复 package.json → 清空 OneBot11 配置"""
+    global _onebot11_ws_configured, _cached_credential  # noqa: PLW0603
+    _onebot11_ws_configured = False
+    _cached_credential = ""
     if not _is_qq_running() and not await _check_webui_reachable():
         # 即使未连接也尝试恢复，确保不残留配置
         pkg = _get_active_pkg()
