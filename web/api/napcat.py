@@ -806,7 +806,7 @@ def _get_active_pkg() -> Path | None:
 
 @router.get("/status")
 async def napcat_status():
-    global _active_exe  # noqa: PLW0603
+    global _active_exe, _onebot11_ws_configured  # noqa: PLW0603
 
     apps = _detect_all_qq_apps()
 
